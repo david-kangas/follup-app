@@ -1,23 +1,35 @@
 # Follup
 
-Stay in touch without overthinking it.
+A simple system for staying on top of the people that matter.
 
-Follup is a lightweight follow-up tracker that helps you keep relationships active by reminding you when to reach out.
+Follup helps you manage follow-ups without relying on memory, scattered notes, or mental overhead. It turns relationship maintenance into a repeatable, low-friction workflow.
 
-## Core Features
+## Core Idea
+
+Productivity isn’t just tasks — it’s people.
+
+Follup makes it easy to:
+- know who needs attention
+- act quickly
+- reset the cycle
+
+No overthinking, no clutter.
+
+## Features
 
 - Track contacts by follow-up timing
-- “Followed up” resets the next touchpoint
+- One-tap “Followed up” reset
 - Custom intervals (days, weeks, months)
-- Local notifications
-- Time simulation for fast testing
+- Subtle notification reminders
 
-## Why it exists
+## Use Case
 
-Most people lose touch not because they don’t care, but because they forget.
+Built from a real question:
 
-Follup keeps that from happening with minimal friction.
+> “Is there a simple way to keep up with people without dropping the ball?”
+
+Follup is the answer — a lightweight system for consistent, intentional follow-through.
 
 ## Status
 
-Early build — currently in active use and testing.
+Early build — actively used and refined through real-world testing.
