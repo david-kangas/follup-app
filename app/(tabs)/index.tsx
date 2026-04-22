@@ -487,7 +487,7 @@ export default function Index() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Follow Up</Text>
+      <Text style={styles.title}>Follup</Text>
 
       <View style={styles.simBox}>
         <Text style={styles.simLabel}>
