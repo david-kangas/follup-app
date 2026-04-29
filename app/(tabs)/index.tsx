@@ -2,6 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,11 +22,13 @@ type ContactItem = {
   intervalValue: number;
   intervalUnit: IntervalUnit;
   notificationId?: string | null;
+  context?: string;
 };
 
 const STORAGE_KEY = 'FOLLOW_UP_DATA';
 const DAY_MS = 86400000;
 const WEEK_MS = 7 * DAY_MS;
+const CONTEXT_LIMIT = 30;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -43,30 +48,9 @@ const getMsFromInterval = (value: number, unit: IntervalUnit) => {
 const makeSampleData = (): ContactItem[] => {
   const now = Date.now();
   return [
-    {
-      id: '1',
-      name: 'Mike',
-      nextDue: now,
-      intervalValue: 1,
-      intervalUnit: 'months',
-      notificationId: null,
-    },
-    {
-      id: '2',
-      name: 'Sarah',
-      nextDue: now + 5 * DAY_MS,
-      intervalValue: 10,
-      intervalUnit: 'days',
-      notificationId: null,
-    },
-    {
-      id: '3',
-      name: 'Chris',
-      nextDue: now - 2 * DAY_MS,
-      intervalValue: 2,
-      intervalUnit: 'weeks',
-      notificationId: null,
-    },
+    { id: '1', name: 'Mike', nextDue: now, intervalValue: 1, intervalUnit: 'months', notificationId: null, context: 'coffee' },
+    { id: '2', name: 'Sarah', nextDue: now + 5 * DAY_MS, intervalValue: 10, intervalUnit: 'days', notificationId: null },
+    { id: '3', name: 'Chris', nextDue: now - 2 * DAY_MS, intervalValue: 2, intervalUnit: 'weeks', notificationId: null, context: 'proposal' },
   ];
 };
 
@@ -76,11 +60,10 @@ export default function Index() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
-
   const [selectedUnit, setSelectedUnit] = useState<IntervalUnit>('months');
+  const [contextInput, setContextInput] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
-
   const [timeOffset, setTimeOffset] = useState(0);
 
   const getNow = () => Date.now() + timeOffset;
@@ -89,11 +72,7 @@ export default function Index() {
     const loadData = async () => {
       try {
         const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          setData(JSON.parse(stored));
-        } else {
-          setData(makeSampleData());
-        }
+        setData(stored ? JSON.parse(stored) : makeSampleData());
       } catch {
         setData(makeSampleData());
       }
@@ -128,10 +107,7 @@ export default function Index() {
     }
 
     const secondsUntilDue = Math.floor((item.nextDue - Date.now()) / 1000);
-
-    if (secondsUntilDue <= 0) {
-      return null;
-    }
+    if (secondsUntilDue <= 0) return null;
 
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
@@ -152,13 +128,13 @@ export default function Index() {
       await Notifications.cancelAllScheduledNotificationsAsync();
     } catch {}
 
-    const fresh = makeSampleData();
     await AsyncStorage.removeItem(STORAGE_KEY);
-    setData(fresh);
+    setData(makeSampleData());
     setEditingId(null);
     setDeletingId(null);
     setEditingNameId(null);
     setSelectedUnit('months');
+    setContextInput('');
     setShowAdd(false);
     setNewName('');
     setTimeOffset(0);
@@ -167,7 +143,8 @@ export default function Index() {
   const applyScheduleNow = async (
     item: ContactItem,
     intervalValue: number,
-    intervalUnit: IntervalUnit
+    intervalUnit: IntervalUnit,
+    context?: string
   ): Promise<ContactItem> => {
     const now = getNow();
 
@@ -177,11 +154,10 @@ export default function Index() {
       intervalUnit,
       nextDue: now + getMsFromInterval(intervalValue, intervalUnit),
       notificationId: item.notificationId ?? null,
+      context: context?.trim() ? context.trim() : undefined,
     };
 
-    // notifications still use real-world time
     updated.notificationId = await scheduleNotificationForItem(updated);
-
     return updated;
   };
 
@@ -191,7 +167,12 @@ export default function Index() {
     const updated = await Promise.all(
       data.map(async (item) =>
         item.id === id
-          ? await applyScheduleNow(item, item.intervalValue, item.intervalUnit)
+          ? await applyScheduleNow(
+              item,
+              item.intervalValue,
+              item.intervalUnit,
+              item.context
+            )
           : item
       )
     );
@@ -201,14 +182,10 @@ export default function Index() {
 
   const handleSetPress = (item: ContactItem) => {
     setDeletingId(null);
-
-    if (editingId === item.id) {
-      setEditingId(null);
-      return;
-    }
-
+    setEditingNameId(null);
     setEditingId(item.id);
     setSelectedUnit(item.intervalUnit);
+    setContextInput(item.context ?? '');
   };
 
   const handleSetInterval = async (
@@ -218,12 +195,15 @@ export default function Index() {
   ) => {
     const updated = await Promise.all(
       data.map(async (item) =>
-        item.id === id ? await applyScheduleNow(item, value, unit) : item
+        item.id === id
+          ? await applyScheduleNow(item, value, unit, contextInput)
+          : item
       )
     );
 
     setData(updated);
     setEditingId(null);
+    setContextInput('');
   };
 
   const armDeleteContact = (id: string) => {
@@ -340,10 +320,13 @@ export default function Index() {
     return `Follow up in ${days} day${days === 1 ? '' : 's'}`;
   };
 
+  const sortByDue = (items: ContactItem[]) =>
+    [...items].sort((a, b) => a.nextDue - b.nextDue);
+
   const sections = {
-    overdue: data.filter((i) => getDayBucket(i.nextDue) === 'overdue'),
-    today: data.filter((i) => getDayBucket(i.nextDue) === 'today'),
-    upcoming: data.filter((i) => getDayBucket(i.nextDue) === 'upcoming'),
+    overdue: sortByDue(data.filter((i) => getDayBucket(i.nextDue) === 'overdue')),
+    today: sortByDue(data.filter((i) => getDayBucket(i.nextDue) === 'today')),
+    upcoming: sortByDue(data.filter((i) => getDayBucket(i.nextDue) === 'upcoming')),
   };
 
   const getOptionsForUnit = (unit: IntervalUnit) => {
@@ -352,60 +335,113 @@ export default function Index() {
     return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   };
 
-  const renderEditor = (item: ContactItem) => {
-    if (editingId !== item.id) return null;
+  const selectedContact = data.find((item) => item.id === editingId);
+  const selectedOptions = getOptionsForUnit(selectedUnit);
 
-    const options = getOptionsForUnit(selectedUnit);
-
-    return (
-      <View style={styles.editorBox}>
-        <Text style={styles.editorLabel}>Set follow up interval</Text>
-
-        <View style={styles.unitRow}>
-          {(['days', 'weeks', 'months'] as IntervalUnit[]).map((unit) => (
-            <TouchableOpacity
-              key={unit}
-              onPress={() => setSelectedUnit(unit)}
-              style={[
-                styles.choiceButton,
-                selectedUnit === unit && styles.choiceButtonSelected,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  selectedUnit === unit && styles.choiceButtonTextSelected,
-                ]}
-              >
-                {unit}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.valueWrap}>
-          {options.map((value) => (
-            <TouchableOpacity
-              key={value}
-              onPress={() => handleSetInterval(item.id, selectedUnit, value)}
-              style={styles.valueButton}
-            >
-              <Text style={styles.valueButtonText}>{value}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
+  const closeSetSheet = () => {
+    setEditingId(null);
+    setContextInput('');
   };
 
+  const renderSetSheet = () => (
+    <Modal
+      visible={!!editingId && !!selectedContact}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={closeSetSheet}
+    >
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={closeSetSheet}
+        />
+
+        <View style={styles.setSheet}>
+          <View style={styles.sheetHeader}>
+            <View>
+              <Text style={styles.sheetTitle}>Set follow up</Text>
+              <Text style={styles.sheetSubtitle}>
+                {selectedContact?.name}
+              </Text>
+            </View>
+
+            <TouchableOpacity onPress={closeSetSheet}>
+              <Text style={styles.closeText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.unitRow}>
+            {(['days', 'weeks', 'months'] as IntervalUnit[]).map((unit) => (
+              <TouchableOpacity
+                key={unit}
+                onPress={() => setSelectedUnit(unit)}
+                style={[
+                  styles.choiceButton,
+                  selectedUnit === unit && styles.choiceButtonSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.choiceButtonText,
+                    selectedUnit === unit && styles.choiceButtonTextSelected,
+                  ]}
+                >
+                  {unit}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.valueWrap}>
+            {selectedOptions.map((value) => (
+              <TouchableOpacity
+                key={value}
+                onPress={() =>
+                  selectedContact &&
+                  handleSetInterval(selectedContact.id, selectedUnit, value)
+                }
+                style={styles.valueButton}
+              >
+                <Text style={styles.valueButtonText}>{value}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.contextBox}>
+            <Text style={styles.contextLabel}>Re:</Text>
+            <TextInput
+              value={contextInput}
+              onChangeText={(text) =>
+                setContextInput(text.slice(0, CONTEXT_LIMIT))
+              }
+              placeholder="brief context"
+              placeholderTextColor="#9A9489"
+              style={styles.contextInput}
+              maxLength={CONTEXT_LIMIT}
+              returnKeyType="done"
+            />
+            <Text style={styles.contextCount}>
+              {contextInput.length}/{CONTEXT_LIMIT}
+            </Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderRow = (item: ContactItem) => (
-    <View key={item.id} style={styles.row}>
+    <View key={item.id} style={styles.card}>
       {editingNameId === item.id ? (
         <>
           <TextInput
             value={tempName}
             onChangeText={setTempName}
             style={styles.input}
+            returnKeyType="done"
+            onSubmitEditing={() => saveName(item.id)}
+            blurOnSubmit={true}
+            autoFocus={true}
           />
           <View style={styles.buttonRow}>
             <TouchableOpacity
@@ -424,17 +460,16 @@ export default function Index() {
         </>
       ) : (
         <>
-          <View style={styles.nameRow}>
-            <Text style={styles.name}>{item.name}</Text>
-            <TouchableOpacity onPress={() => startEditName(item)}>
-              <Text style={styles.icon}>✏️</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.name}>{item.name}</Text>
+
+          {item.context ? (
+            <Text style={styles.contextText}>Re: {item.context}</Text>
+          ) : null}
 
           <Text style={styles.status}>{getStatusText(item)}</Text>
 
           {deletingId === item.id ? (
-            <View style={styles.buttonRow}>
+            <View style={styles.deleteConfirmRow}>
               <TouchableOpacity
                 onPress={cancelDelete}
                 style={styles.secondaryButton}
@@ -445,30 +480,42 @@ export default function Index() {
                 onPress={() => confirmDelete(item.id)}
                 style={styles.deleteButton}
               >
-                <Text style={styles.deleteButtonText}>Confirm</Text>
+                <Text style={styles.deleteButtonText}>Confirm delete</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                onPress={() => handleSetPress(item)}
-                style={styles.secondaryButton}
-              >
-                <Text style={styles.secondaryButtonText}>Set</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleFollowUp(item.id)}
-                style={styles.primaryButton}
-              >
-                <Text style={styles.primaryButtonText}>Followed up</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => armDeleteContact(item.id)}>
-                <Text style={styles.deleteIcon}>🗑️</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            <>
+              <View style={styles.mainActions}>
+                <TouchableOpacity
+                  onPress={() => handleFollowUp(item.id)}
+                  style={styles.primaryButton}
+                >
+                  <Text style={styles.primaryButtonText}>Followed up</Text>
+                </TouchableOpacity>
 
-          {renderEditor(item)}
+                <TouchableOpacity
+                  onPress={() => handleSetPress(item)}
+                  style={styles.secondaryButton}
+                >
+                  <Text style={styles.secondaryButtonText}>Set</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.utilityRow}>
+                <View style={styles.utilityLeft}>
+                  <TouchableOpacity onPress={() => startEditName(item)}>
+                    <Text style={styles.editText}>Edit</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.utilityRight}>
+                  <TouchableOpacity onPress={() => armDeleteContact(item.id)}>
+                    <Text style={styles.deleteText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </>
+          )}
         </>
       )}
     </View>
@@ -477,124 +524,157 @@ export default function Index() {
   const renderSection = (title: string, items: ContactItem[]) => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
-      {items.length === 0 ? (
-        <Text style={styles.empty}>None</Text>
-      ) : (
-        items.map(renderRow)
-      )}
+      {items.map(renderRow)}
     </View>
   );
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Follup</Text>
-
-      <View style={styles.simBox}>
-        <Text style={styles.simLabel}>
-          Simulated now: {new Date(getNow()).toLocaleString()}
-        </Text>
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            onPress={() => setTimeOffset((current) => current + DAY_MS)}
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>+1 Day</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setTimeOffset((current) => current + WEEK_MS)}
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>+1 Week</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setTimeOffset(0)}
-            style={styles.secondaryButton}
-          >
-            <Text style={styles.secondaryButtonText}>Reset Sim Time</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <TouchableOpacity
-        onPress={() => setShowAdd(!showAdd)}
-        style={styles.addButton}
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={20}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.addButtonText}>+ Add Contact</Text>
-      </TouchableOpacity>
+        <Text style={styles.title}>Follup</Text>
 
-      {showAdd && (
-        <View style={styles.addBox}>
-          <TextInput
-            value={newName}
-            onChangeText={setNewName}
-            style={styles.input}
-            placeholder="Name"
-          />
+        <View style={styles.simBox}>
+          <Text style={styles.simLabel}>
+            Simulated now: {new Date(getNow()).toLocaleString()}
+          </Text>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              onPress={() => setTimeOffset((current) => current + DAY_MS)}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryButtonText}>+1 Day</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setTimeOffset((current) => current + WEEK_MS)}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryButtonText}>+1 Week</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setTimeOffset(0)}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryButtonText}>Reset Sim Time</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          onPress={() => setShowAdd(!showAdd)}
+          style={styles.addButton}
+        >
+          <Text style={styles.addButtonText}>+ Add Contact</Text>
+        </TouchableOpacity>
+
+        {showAdd && (
+          <View style={styles.addBox}>
+            <TextInput
+              value={newName}
+              onChangeText={setNewName}
+              style={styles.input}
+              placeholder="Name"
+              returnKeyType="done"
+              onSubmitEditing={handleAddContact}
+              blurOnSubmit={true}
+              autoFocus={true}
+            />
+            <TouchableOpacity
+              onPress={handleAddContact}
+              style={styles.primaryButton}
+            >
+              <Text style={styles.primaryButtonText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={{ marginBottom: 12 }}>
           <TouchableOpacity
-            onPress={handleAddContact}
-            style={styles.primaryButton}
+            onPress={sendTestNotification}
+            style={styles.secondaryButton}
           >
-            <Text style={styles.primaryButtonText}>Save</Text>
+            <Text style={styles.secondaryButtonText}>Test Notification (5 sec)</Text>
           </TouchableOpacity>
         </View>
-      )}
 
-      <View style={{ marginBottom: 12 }}>
-        <TouchableOpacity
-          onPress={sendTestNotification}
-          style={styles.secondaryButton}
-        >
-          <Text style={styles.secondaryButtonText}>Test Notification (5 sec)</Text>
+        <TouchableOpacity onPress={resetData}>
+          <Text style={styles.resetText}>Reset Sample Data</Text>
         </TouchableOpacity>
-      </View>
 
-      <TouchableOpacity onPress={resetData}>
-        <Text style={styles.resetText}>Reset Sample Data</Text>
-      </TouchableOpacity>
+        {data.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Welcome to Follup</Text>
+            <Text style={styles.emptySubtitle}>
+              Tap + Add Contact to get started.
+            </Text>
+          </View>
+        ) : (
+          <>
+            {sections.overdue.length > 0 &&
+              renderSection('Reach out', sections.overdue)}
+            {sections.today.length > 0 &&
+              renderSection('Today', sections.today)}
+            {sections.upcoming.length > 0 &&
+              renderSection('Upcoming', sections.upcoming)}
+          </>
+        )}
+      </ScrollView>
 
-      {renderSection('Overdue', sections.overdue)}
-      {renderSection('Today', sections.today)}
-      {renderSection('Upcoming', sections.upcoming)}
-    </ScrollView>
+      {renderSetSheet()}
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#F1EDE5',
+  },
   container: {
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 30,
+    fontWeight: '700',
+    marginBottom: 16,
+    color: '#1F2933',
   },
 
   simBox: {
     marginBottom: 16,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#f8fafc',
+    borderColor: '#D8D1C5',
+    borderRadius: 12,
+    backgroundColor: '#FBF8F1',
   },
   simLabel: {
     marginBottom: 10,
-    color: '#334155',
+    color: '#6F6A61',
     fontSize: 13,
   },
 
   addButton: {
-    backgroundColor: '#2563eb',
-    padding: 10,
+    backgroundColor: '#244C5A',
+    paddingVertical: 11,
+    paddingHorizontal: 16,
     borderRadius: 8,
     marginBottom: 12,
+    alignItems: 'center',
   },
   addButtonText: {
-    color: '#fff',
+    color: '#FBF8F1',
+    fontWeight: '600',
   },
 
   addBox: {
@@ -602,44 +682,74 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
+    borderColor: '#B8B2A6',
+    backgroundColor: '#FBF8F1',
+    padding: 12,
     borderRadius: 8,
     marginBottom: 10,
+    color: '#1F2933',
   },
 
   resetText: {
-    color: '#2563eb',
+    color: '#244C5A',
     marginBottom: 20,
+    fontWeight: '600',
+  },
+
+  emptyState: {
+    marginTop: 40,
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    color: '#1F2933',
+  },
+  emptySubtitle: {
+    color: '#6F6A61',
+    fontSize: 15,
+    textAlign: 'center',
   },
 
   section: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   sectionTitle: {
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  empty: {
-    color: 'gray',
+    fontWeight: '600',
+    fontSize: 14,
+    letterSpacing: 0.5,
+    color: '#6F6A61',
+    marginBottom: 8,
+    textTransform: 'uppercase',
   },
 
-  row: {
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderColor: '#eee',
-  },
-  nameRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  card: {
+    backgroundColor: '#FBF8F1',
+    borderRadius: 14,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#D8D1C5',
   },
   name: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 19,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    color: '#1F2933',
+  },
+  contextText: {
+    color: '#6F6A61',
+    marginTop: 4,
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   status: {
-    color: 'gray',
-    marginBottom: 6,
+    color: '#6F6A61',
+    marginTop: 6,
+    marginBottom: 18,
+    fontSize: 14,
   },
 
   buttonRow: {
@@ -647,68 +757,135 @@ const styles = StyleSheet.create({
     gap: 10,
     flexWrap: 'wrap',
   },
+  mainActions: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  deleteConfirmRow: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+
+  utilityRow: {
+    flexDirection: 'row',
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  utilityLeft: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  utilityRight: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
 
   primaryButton: {
-    backgroundColor: '#2563eb',
-    padding: 8,
-    borderRadius: 6,
+    backgroundColor: '#244C5A',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: '#FBF8F1',
+    fontWeight: '600',
   },
 
   secondaryButton: {
     borderWidth: 1,
-    borderColor: '#2563eb',
-    padding: 8,
-    borderRadius: 6,
+    borderColor: '#B8B2A6',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: '#FBF8F1',
   },
   secondaryButtonText: {
-    color: '#2563eb',
+    color: '#244C5A',
+    fontWeight: '600',
   },
 
+  editText: {
+    color: '#244C5A',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  deleteText: {
+    color: '#8F2D2D',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   deleteButton: {
-    backgroundColor: '#dc2626',
-    padding: 8,
-    borderRadius: 6,
+    backgroundColor: '#8F2D2D',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
   },
   deleteButtonText: {
-    color: '#fff',
+    color: '#FBF8F1',
+    fontWeight: '600',
   },
 
-  deleteIcon: {
-    fontSize: 18,
-    color: '#dc2626',
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
   },
-  icon: {
-    fontSize: 16,
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(31, 41, 51, 0.35)',
+  },
+  setSheet: {
+    backgroundColor: '#FBF8F1',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#D8D1C5',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1F2933',
+  },
+  sheetSubtitle: {
+    color: '#6F6A61',
+    marginTop: 4,
+  },
+  closeText: {
+    color: '#244C5A',
+    fontWeight: '600',
   },
 
-  editorBox: {
-    marginTop: 10,
-  },
-  editorLabel: {
-    fontSize: 13,
-    color: 'gray',
-    marginBottom: 8,
-  },
   unitRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   choiceButton: {
-    padding: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#B8B2A6',
+    borderRadius: 8,
+    backgroundColor: '#FBF8F1',
   },
   choiceButtonSelected: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: '#244C5A',
+    borderColor: '#244C5A',
   },
-  choiceButtonText: {},
+  choiceButtonText: {
+    color: '#1F2933',
+    fontWeight: '600',
+  },
   choiceButtonTextSelected: {
-    color: '#fff',
+    color: '#FBF8F1',
   },
 
   valueWrap: {
@@ -717,9 +894,42 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   valueButton: {
-    padding: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#B8B2A6',
+    borderRadius: 8,
+    backgroundColor: '#FBF8F1',
   },
-  valueButtonText: {},
+  valueButtonText: {
+    color: '#1F2933',
+    fontWeight: '600',
+  },
+
+  contextBox: {
+    marginTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: '#E2DDD4',
+    paddingTop: 14,
+  },
+  contextLabel: {
+    fontSize: 13,
+    color: '#6F6A61',
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  contextInput: {
+    borderWidth: 1,
+    borderColor: '#B8B2A6',
+    backgroundColor: '#FBF8F1',
+    padding: 10,
+    borderRadius: 8,
+    color: '#1F2933',
+  },
+  contextCount: {
+    color: '#6F6A61',
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'right',
+  },
 });
