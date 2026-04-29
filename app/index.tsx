@@ -1,257 +1,237 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 type IntervalUnit = 'days' | 'weeks' | 'months';
-
 type ContactItem = {
   id: string;
   name: string;
   nextDue: number;
   intervalValue: number;
   intervalUnit: IntervalUnit;
-  notificationId?: string | null;
   context?: string;
 };
 
-const STORAGE_KEY = 'FOLLOW_UP_DATA';
+const STORAGE_KEY = 'FOLLUP_APP_DATA_PIXEL_PERFECT';
 const DAY_MS = 86400000;
-const CONTEXT_LIMIT = 30;
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  } as Notifications.NotificationBehavior),
-});
-
-const getMsFromInterval = (value: number, unit: IntervalUnit) => {
-  if (unit === 'days') return value * DAY_MS;
-  if (unit === 'weeks') return value * 7 * DAY_MS;
-  return value * 30 * DAY_MS;
-};
 
 export default function Index() {
   const [data, setData] = useState<ContactItem[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [selectedUnit, setSelectedUnit] = useState<IntervalUnit>('months');
-  const [contextInput, setContextInput] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const [nameBuf, setNameBuf] = useState('');
+  const [contextBuf, setContextBuf] = useState('');
+  const [unitBuf, setUnitBuf] = useState<IntervalUnit>('weeks');
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        setData(stored ? JSON.parse(stored) : []);
-      } catch (e) {
-        setData([]);
-      }
-    };
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    const requestPermissions = async () => {
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== 'granted') {
-        await Notifications.requestPermissionsAsync();
-      }
-    };
-    requestPermissions();
+    (async () => {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (stored) setData(JSON.parse(stored));
+    })();
   }, []);
 
   useEffect(() => {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
-  const scheduleNotificationForItem = async (item: ContactItem): Promise<string | null> => {
-    if (item.notificationId) {
-      try { await Notifications.cancelScheduledNotificationAsync(item.notificationId); } catch (e) {}
-    }
-    const secondsUntilDue = Math.floor((item.nextDue - Date.now()) / 1000);
-    const triggerSeconds = secondsUntilDue > 0 ? secondsUntilDue : 2;
-    try {
-      return await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Follow up',
-          body: `${item.name} is due for a follow up`,
-          sound: 'default',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: triggerSeconds,
-        },
-      });
-    } catch (e) {
-      return null;
-    }
+  const schedule = async (item: ContactItem) => {
+    const seconds = Math.max(2, Math.floor((item.nextDue - Date.now()) / 1000));
+    await Notifications.scheduleNotificationAsync({
+      content: { title: 'Follup', body: `Check in with ${item.name}` },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
+    });
   };
 
-  const applyScheduleNow = async (item: ContactItem, val: number, unit: IntervalUnit, ctx?: string): Promise<ContactItem> => {
-    const updated: ContactItem = {
-      ...item,
-      intervalValue: val,
-      intervalUnit: unit,
-      nextDue: Date.now() + getMsFromInterval(val, unit),
-      context: ctx?.trim() || undefined,
+  const handleSave = async (selectedVal: number, existingId?: string) => {
+    if (!nameBuf.trim()) return;
+    const ms = unitBuf === 'days' ? selectedVal * DAY_MS : unitBuf === 'weeks' ? selectedVal * 7 * DAY_MS : selectedVal * 30 * DAY_MS;
+    const nextDue = Date.now() + ms;
+    const newItem: ContactItem = {
+      id: existingId || String(Date.now()),
+      name: nameBuf.trim(),
+      context: contextBuf.trim() || undefined,
+      intervalValue: selectedVal,
+      intervalUnit: unitBuf,
+      nextDue,
     };
-    updated.notificationId = await scheduleNotificationForItem(updated);
-    return updated;
+    setData(existingId ? data.map(i => i.id === existingId ? newItem : i) : [newItem, ...data]);
+    await schedule(newItem);
+    closeAll();
   };
 
-  const handleFollowUp = async (id: string) => {
-    const updated = await Promise.all(data.map(async (item) => 
-      item.id === id ? await applyScheduleNow(item, item.intervalValue, item.intervalUnit, item.context) : item
-    ));
-    setData(updated);
+  const handleFollowUp = async (item: ContactItem) => {
+    const ms = item.intervalUnit === 'days' ? item.intervalValue * DAY_MS : 
+               item.intervalUnit === 'weeks' ? item.intervalValue * 7 * DAY_MS : 
+               item.intervalValue * 30 * DAY_MS;
+    const nextDue = Date.now() + ms;
+    const updated = { ...item, nextDue };
+    setData(data.map(i => i.id === item.id ? updated : i));
+    await schedule(updated);
   };
 
-  const handleSetInterval = async (id: string, unit: IntervalUnit, value: number) => {
-    const updated = await Promise.all(data.map(async (item) => 
-      item.id === id ? await applyScheduleNow(item, value, unit, contextInput) : item
-    ));
-    setData(updated);
-    setEditingId(null);
-    setContextInput('');
+  const closeAll = () => {
+    setIsAdding(false);
+    setExpandedId(null);
+    setConfirmDeleteId(null);
+    setNameBuf('');
+    setContextBuf('');
   };
 
-  const handleAddContact = async () => {
-    if (!newName.trim()) return;
-    const realNow = Date.now();
-    let newContact: ContactItem = {
-      id: String(realNow),
-      name: newName.trim(),
-      nextDue: realNow,
-      intervalValue: 1,
-      intervalUnit: 'months',
-    };
-    newContact.notificationId = await scheduleNotificationForItem(newContact);
-    setData((current) => [newContact, ...current]);
-    setNewName('');
-    setShowAdd(false);
+  const startEdit = (item: ContactItem, index: number) => {
+    setExpandedId(item.id);
+    setNameBuf(item.name);
+    setContextBuf(item.context || '');
+    setUnitBuf(item.intervalUnit);
+    setIsAdding(false);
+    scrollRef.current?.scrollTo({ y: index * 150, animated: true });
   };
 
-  const getDayBucket = (nextDue: number) => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const endOfToday = startOfToday + DAY_MS;
-    if (nextDue < startOfToday) return 'overdue';
-    if (nextDue < endOfToday) return 'today';
-    return 'upcoming';
+  const getNumberRange = () => {
+    if (unitBuf === 'weeks') return [1, 2, 3, 4];
+    if (unitBuf === 'days') return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   };
 
-  const getStatusText = (item: ContactItem) => {
-    const bucket = getDayBucket(item.nextDue);
-    if (bucket === 'overdue') return 'Follow up when you can';
-    if (bucket === 'today') return 'Follow up today';
-    const days = Math.ceil((item.nextDue - Date.now()) / DAY_MS);
-    return `Follow up in ${days} day${days === 1 ? '' : 's'}`;
-  };
+  const startOfToday = new Date().setHours(0,0,0,0);
+  const endOfToday = startOfToday + DAY_MS;
 
-  const renderRow = (item: ContactItem) => (
-    <View key={item.id} style={styles.card}>
-      <Text style={styles.name}>{item.name}</Text>
-      {item.context && <Text style={styles.contextText}>Re: {item.context}</Text>}
-      <Text style={styles.status}>{getStatusText(item)}</Text>
-      <View style={styles.mainActions}>
-        <TouchableOpacity onPress={() => handleFollowUp(item.id)} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Followed up</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => { setEditingId(item.id); setSelectedUnit(item.intervalUnit); setContextInput(item.context || ''); }} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Set</Text></TouchableOpacity>
+  const checkInList = data.filter(i => i.nextDue < startOfToday).sort((a,b) => a.nextDue - b.nextDue);
+  const todayList = data.filter(i => i.nextDue >= startOfToday && i.nextDue < endOfToday).sort((a,b) => a.nextDue - b.nextDue);
+  const upcomingList = data.filter(i => i.nextDue >= endOfToday).sort((a,b) => a.nextDue - b.nextDue);
+
+  const renderActiveEditor = (existingId?: string) => (
+    <View style={[styles.card, styles.activeCard]}>
+      <Text style={styles.label}>Focus Mode</Text>
+      <TextInput value={nameBuf} onChangeText={setNameBuf} style={styles.inputBold} placeholder="Name" autoFocus />
+      <TextInput value={contextBuf} onChangeText={setContextBuf} style={styles.inputContext} placeholder="Re: Context" />
+      <View style={styles.divider} />
+      <View style={styles.unitRow}>
+        {(['days', 'weeks', 'months'] as IntervalUnit[]).map(u => (
+          <TouchableOpacity key={u} onPress={() => setUnitBuf(u)} style={[styles.unitBtn, unitBuf === u && styles.unitBtnActive]}>
+            <Text style={unitBuf === u ? styles.btnTextWhite : styles.btnTextDark}>{u}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
+      <View style={styles.valRow}>
+        {getNumberRange().map(v => (
+          <TouchableOpacity key={v} onPress={() => handleSave(v, existingId)} style={styles.valBtn}>
+            <Text style={styles.btnTextDark}>{v}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <TouchableOpacity onPress={closeAll} style={styles.cancelBtn}><Text style={styles.cancelText}>Cancel</Text></TouchableOpacity>
     </View>
   );
 
-  const overdue = data.filter(i => getDayBucket(i.nextDue) === 'overdue').sort((a,b) => a.nextDue - b.nextDue);
-  const today = data.filter(i => getDayBucket(i.nextDue) === 'today').sort((a,b) => a.nextDue - b.nextDue);
-  const upcoming = data.filter(i => getDayBucket(i.nextDue) === 'upcoming').sort((a,b) => a.nextDue - b.nextDue);
+  const renderCard = (item: ContactItem, status: string, index: number) => {
+    if (expandedId === item.id) return renderActiveEditor(item.id);
 
-  return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Follup</Text>
-        <TouchableOpacity onPress={() => setShowAdd(!showAdd)} style={styles.addButton}><Text style={styles.addButtonText}>+ Add Contact</Text></TouchableOpacity>
-        {showAdd && (
-          <View style={styles.addBox}>
-            <TextInput value={newName} onChangeText={setNewName} style={styles.input} placeholder="Name" returnKeyType="done" onSubmitEditing={handleAddContact} autoFocus />
-            <TouchableOpacity onPress={handleAddContact} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Save</Text></TouchableOpacity>
+    return (
+      <View key={item.id} style={styles.card}>
+        <Text style={styles.cardName}>{item.name}</Text>
+        {item.context && <Text style={styles.cardContext}>Re: {item.context}</Text>}
+        <Text style={styles.statusText}>{status}</Text>
+        
+        {/* ROW 1: PRIMARY ACTIONS */}
+        <View style={styles.primaryActionRow}>
+          <TouchableOpacity onPress={() => handleFollowUp(item)} style={styles.btnTeal}>
+            <Text style={styles.btnTextWhite}>Followed up</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => startEdit(item, index)} style={styles.btnSet}>
+            <Text style={styles.btnTextDark}>Set</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ROW 2: TEXT LINKS WITH VERTICAL GRID ALIGNMENT */}
+        <View style={styles.secondaryActionRow}>
+          <View style={styles.editWrapper}>
+            <TouchableOpacity onPress={() => startEdit(item, index)}>
+                <Text style={styles.linkText}>Edit</Text>
+            </TouchableOpacity>
           </View>
-        )}
-        {data.length === 0 ? (
-          <View style={styles.emptyState}><Text style={styles.emptyTitle}>Welcome to Follup</Text><Text style={styles.emptySubtitle}>Tap + Add Contact to get started.</Text></View>
-        ) : (
-          <>
-            {overdue.length > 0 && <View style={styles.section}><Text style={styles.sectionTitle}>Reach out</Text>{overdue.map(renderRow)}</View>}
-            {today.length > 0 && <View style={styles.section}><Text style={styles.sectionTitle}>Today</Text>{today.map(renderRow)}</View>}
-            {upcoming.length > 0 && <View style={styles.section}><Text style={styles.sectionTitle}>Upcoming</Text>{upcoming.map(renderRow)}</View>}
-          </>
-        )}
-      </ScrollView>
-      <Modal visible={!!editingId} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalBackdrop} onPress={() => setEditingId(null)} />
-          <View style={styles.setSheet}>
-            <Text style={styles.sheetTitle}>Set follow up</Text>
-            <View style={styles.unitRow}>{(['days', 'weeks', 'months'] as IntervalUnit[]).map(u => (
-              <TouchableOpacity key={u} onPress={() => setSelectedUnit(u)} style={[styles.choiceButton, selectedUnit === u && styles.choiceButtonSelected]}><Text style={[styles.choiceButtonText, selectedUnit === u && styles.choiceButtonTextSelected]}>{u}</Text></TouchableOpacity>
-            ))}</View>
-            <View style={styles.valueWrap}>{[1, 2, 3, 4, 7, 10, 14, 30].map(v => (
-              <TouchableOpacity key={v} onPress={() => editingId && handleSetInterval(editingId, selectedUnit, v)} style={styles.valueButton}><Text style={styles.valueButtonText}>{v}</Text></TouchableOpacity>
-            ))}</View>
-            <View style={styles.contextBox}><Text style={styles.contextLabel}>Re:</Text><TextInput value={contextInput} onChangeText={setContextInput} placeholder="brief context" style={styles.contextInput} maxLength={CONTEXT_LIMIT} /></View>
+          
+          <View style={styles.deleteWrapper}>
+            {confirmDeleteId === item.id ? (
+                <TouchableOpacity onPress={() => setData(data.filter(i => i.id !== item.id))}>
+                <Text style={styles.deleteConfirmText}>Confirm?</Text>
+                </TouchableOpacity>
+            ) : (
+                <TouchableOpacity onPress={() => setConfirmDeleteId(item.id)}>
+                <Text style={styles.linkTextRed}>Delete</Text>
+                </TouchableOpacity>
+            )}
           </View>
         </View>
-      </Modal>
+      </View>
+    );
+  };
+
+  return (
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <Text style={styles.header}>Follup</Text>
+        {!isAdding && !expandedId && (
+          <TouchableOpacity onPress={() => setIsAdding(true)} style={styles.addBtn}>
+            <Text style={styles.addBtnText}>+ Add Contact</Text>
+          </TouchableOpacity>
+        )}
+        {isAdding && renderActiveEditor()}
+        {checkInList.length > 0 && <><Text style={styles.sectionHeader}>Check In</Text>{checkInList.map((i, idx) => renderCard(i, 'Past due', idx))}</>}
+        {todayList.length > 0 && <><Text style={styles.sectionHeader}>Today</Text>{todayList.map((i, idx) => renderCard(i, 'Due today', idx))}</>}
+        {upcomingList.length > 0 && <><Text style={styles.sectionHeader}>Upcoming</Text>{upcomingList.map((i, idx) => renderCard(i, `Follow up in ${Math.ceil((i.nextDue - Date.now()) / DAY_MS)} days`, idx))}</>}
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#F1EDE5' },
-  container: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 40 },
-  title: { fontSize: 30, fontWeight: '700', marginBottom: 24, color: '#1F2933' },
-  addButton: { backgroundColor: '#244C5A', paddingVertical: 11, paddingHorizontal: 16, borderRadius: 8, marginBottom: 24, alignItems: 'center' },
-  addButtonText: { color: '#FBF8F1', fontWeight: '600' },
-  addBox: { marginBottom: 20 },
-  input: { borderWidth: 1, borderColor: '#B8B2A6', backgroundColor: '#FBF8F1', padding: 12, borderRadius: 8, marginBottom: 10, color: '#1F2933' },
-  emptyState: { marginTop: 60, alignItems: 'center' },
-  emptyTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8, color: '#1F2933' },
-  emptySubtitle: { color: '#6F6A61', fontSize: 15, textAlign: 'center' },
-  section: { marginBottom: 24 },
-  sectionTitle: { fontWeight: '600', fontSize: 14, color: '#6F6A61', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
-  card: { backgroundColor: '#FBF8F1', borderRadius: 14, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#D8D1C5' },
-  name: { fontSize: 19, fontWeight: '700', color: '#1F2933' },
-  contextText: { color: '#6F6A61', marginTop: 4, fontSize: 14, fontStyle: 'italic' },
-  status: { color: '#6F6A61', marginTop: 6, marginBottom: 18, fontSize: 14 },
-  mainActions: { flexDirection: 'row', gap: 10 },
-  primaryButton: { backgroundColor: '#244C5A', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
-  primaryButtonText: { color: '#FBF8F1', fontWeight: '600' },
-  secondaryButton: { borderWidth: 1, borderColor: '#B8B2A6', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#FBF8F1' },
-  secondaryButtonText: { color: '#244C5A', fontWeight: '600' },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(31, 41, 51, 0.35)' },
-  setSheet: { backgroundColor: '#FBF8F1', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, borderWidth: 1, borderColor: '#D8D1C5' },
-  sheetTitle: { fontSize: 20, fontWeight: '700', color: '#1F2933', marginBottom: 16 },
-  unitRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  choiceButton: { paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: '#B8B2A6', borderRadius: 8, backgroundColor: '#FBF8F1' },
-  choiceButtonSelected: { backgroundColor: '#244C5A', borderColor: '#244C5A' },
-  choiceButtonText: { color: '#1F2933', fontWeight: '600' },
-  choiceButtonTextSelected: { color: '#FBF8F1' },
-  valueWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
-  valueButton: { paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: '#B8B2A6', borderRadius: 8, backgroundColor: '#FBF8F1' },
-  valueButtonText: { color: '#1F2933', fontWeight: '600' },
-  contextBox: { marginTop: 18, borderTopWidth: 1, borderTopColor: '#E2DDD4', paddingTop: 14 },
-  contextLabel: { fontSize: 13, color: '#6F6A61', marginBottom: 6 },
-  contextInput: { borderWidth: 1, borderColor: '#B8B2A6', backgroundColor: '#FBF8F1', padding: 10, borderRadius: 8, color: '#1F2933' },
+  container: { flex: 1, backgroundColor: '#F1EDE5' },
+  scroll: { padding: 20, paddingTop: 60, paddingBottom: 100 },
+  header: { fontSize: 34, fontWeight: '900', color: '#1F2933', marginBottom: 25 },
+  sectionHeader: { fontSize: 14, fontWeight: '700', color: '#6F6A61', marginTop: 25, marginBottom: 15, textTransform: 'uppercase', letterSpacing: 1.5 },
+  addBtn: { backgroundColor: '#244C5A', padding: 18, borderRadius: 15, alignItems: 'center', marginBottom: 20 },
+  addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 18 },
+  card: { backgroundColor: '#FBF8F1', padding: 24, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#D8D1C5' },
+  activeCard: { borderColor: '#244C5A', borderWidth: 2 },
+  cardName: { fontSize: 32, fontWeight: '800', color: '#1F2933' },
+  cardContext: { fontSize: 20, color: '#6F6A61', fontStyle: 'italic', marginTop: 4 },
+  statusText: { fontSize: 18, color: '#6F6A61', marginVertical: 14 },
+  
+  primaryActionRow: { flexDirection: 'row', gap: 12, marginBottom: 15 },
+  btnTeal: { backgroundColor: '#244C5A', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 10, minWidth: 160, alignItems: 'center' },
+  btnSet: { borderWidth: 1, borderColor: '#D8D1C5', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 10, backgroundColor: '#FFF', minWidth: 80, alignItems: 'center' },
+  btnTextWhite: { color: '#FFF', fontWeight: '800', fontSize: 20 },
+  btnTextDark: { color: '#244C5A', fontWeight: '800', fontSize: 20 },
+  
+  secondaryActionRow: { flexDirection: 'row', gap: 12 },
+  editWrapper: { minWidth: 160, alignItems: 'flex-start', paddingLeft: 4 }, // Aligns with 'Followed Up'
+  deleteWrapper: { minWidth: 80, alignItems: 'flex-start' }, // Aligns with 'Set'
+  linkText: { color: '#244C5A', fontWeight: '800', fontSize: 20 },
+  linkTextRed: { color: '#9B4444', fontWeight: '800', fontSize: 20 },
+  deleteConfirmText: { color: '#9B4444', fontWeight: '900', fontSize: 18, textDecorationLine: 'underline' },
+
+  label: { fontSize: 11, fontWeight: '800', color: '#B8B2A6', textTransform: 'uppercase', marginBottom: 8 },
+  inputBold: { fontSize: 28, fontWeight: '800', color: '#1F2933', borderBottomWidth: 1, borderColor: '#D8D1C5', paddingBottom: 5, marginBottom: 10 },
+  inputContext: { fontSize: 18, color: '#6F6A61', fontStyle: 'italic', marginBottom: 20 },
+  divider: { height: 1, backgroundColor: '#E2DDD4', marginVertical: 15 },
+  unitRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
+  unitBtn: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#D8D1C5' },
+  unitBtnActive: { backgroundColor: '#244C5A', borderColor: '#244C5A' },
+  valRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  valBtn: { padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#D8D1C5', minWidth: 50, alignItems: 'center' },
+  cancelBtn: { marginTop: 20, padding: 10 },
+  cancelText: { textAlign: 'center', color: '#6F6A61', fontWeight: '700' }
 });
