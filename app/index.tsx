@@ -2,18 +2,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import React, { useEffect, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
-// --- Types ---
 type IntervalUnit = 'days' | 'weeks' | 'months';
 
 type ContactItem = {
@@ -26,12 +25,10 @@ type ContactItem = {
   context?: string;
 };
 
-// --- Constants ---
 const STORAGE_KEY = 'FOLLOW_UP_DATA';
 const DAY_MS = 86400000;
 const CONTEXT_LIMIT = 30;
 
-// --- Notification Handler ---
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -53,8 +50,6 @@ export default function Index() {
   const [contextInput, setContextInput] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
-
-  const getNow = () => Date.now();
 
   useEffect(() => {
     const loadData = async () => {
@@ -86,10 +81,8 @@ export default function Index() {
     if (item.notificationId) {
       try { await Notifications.cancelScheduledNotificationAsync(item.notificationId); } catch (e) {}
     }
-
     const secondsUntilDue = Math.floor((item.nextDue - Date.now()) / 1000);
     const triggerSeconds = secondsUntilDue > 0 ? secondsUntilDue : 2;
-
     try {
       return await Notifications.scheduleNotificationAsync({
         content: {
@@ -112,7 +105,7 @@ export default function Index() {
       ...item,
       intervalValue: val,
       intervalUnit: unit,
-      nextDue: getNow() + getMsFromInterval(val, unit),
+      nextDue: Date.now() + getMsFromInterval(val, unit),
       context: ctx?.trim() || undefined,
     };
     updated.notificationId = await scheduleNotificationForItem(updated);
@@ -152,7 +145,7 @@ export default function Index() {
   };
 
   const getDayBucket = (nextDue: number) => {
-    const now = new Date(getNow());
+    const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const endOfToday = startOfToday + DAY_MS;
     if (nextDue < startOfToday) return 'overdue';
@@ -164,7 +157,7 @@ export default function Index() {
     const bucket = getDayBucket(item.nextDue);
     if (bucket === 'overdue') return 'Follow up when you can';
     if (bucket === 'today') return 'Follow up today';
-    const days = Math.ceil((item.nextDue - getNow()) / DAY_MS);
+    const days = Math.ceil((item.nextDue - Date.now()) / DAY_MS);
     return `Follow up in ${days} day${days === 1 ? '' : 's'}`;
   };
 
