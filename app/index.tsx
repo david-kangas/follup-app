@@ -89,14 +89,15 @@ export default function Index() {
     setNameBuf('');
     setContextBuf('');
   };
-
-  const startEdit = (item: ContactItem, index: number) => {
+const startEdit = (item: ContactItem, index: number) => {
+    // This part fills the editor with the person's current info
     setExpandedId(item.id);
     setNameBuf(item.name);
     setContextBuf(item.context || '');
     setUnitBuf(item.intervalUnit);
     setIsAdding(false);
-    scrollRef.current?.scrollTo({ y: index * 150, animated: true });
+
+  
   };
 
   const getNumberRange = () => {
@@ -113,9 +114,9 @@ export default function Index() {
   const upcomingList = data.filter(i => i.nextDue >= endOfToday).sort((a,b) => a.nextDue - b.nextDue);
 
   const renderActiveEditor = (existingId?: string) => (
-    <View style={[styles.card, styles.activeCard]}>
-      <Text style={styles.label}>Focus Mode</Text>
-      <TextInput value={nameBuf} onChangeText={setNameBuf} style={styles.inputBold} placeholder="Name" autoFocus />
+  <View key={existingId || 'new-contact'} style={[styles.card, styles.activeCard]}>
+      <Text style={styles.label}>Update Entry</Text>
+      <TextInput value={nameBuf} onChangeText={setNameBuf} style={styles.inputBold} placeholder="Name" />
       <TextInput value={contextBuf} onChangeText={setContextBuf} style={styles.inputContext} placeholder="Re: Context" />
       <View style={styles.divider} />
       <View style={styles.unitRow}>
@@ -181,7 +182,13 @@ export default function Index() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView 
+  ref={scrollRef} 
+  contentContainerStyle={styles.scroll} 
+  keyboardShouldPersistTaps="handled"
+  disableScrollViewPanResponder={true}
+  
+>
         <Text style={styles.header}>Follup</Text>
         {!isAdding && !expandedId && (
           <TouchableOpacity onPress={() => setIsAdding(true)} style={styles.addBtn}>
@@ -192,6 +199,7 @@ export default function Index() {
         {checkInList.length > 0 && <><Text style={styles.sectionHeader}>Check In</Text>{checkInList.map((i, idx) => renderCard(i, 'Past due', idx))}</>}
         {todayList.length > 0 && <><Text style={styles.sectionHeader}>Today</Text>{todayList.map((i, idx) => renderCard(i, 'Due today', idx))}</>}
         {upcomingList.length > 0 && <><Text style={styles.sectionHeader}>Upcoming</Text>{upcomingList.map((i, idx) => renderCard(i, `Follow up in ${Math.ceil((i.nextDue - Date.now()) / DAY_MS)} days`, idx))}</>}
+      
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -201,37 +209,50 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F1EDE5' },
   scroll: { padding: 20, paddingTop: 60, paddingBottom: 100 },
   header: { fontSize: 34, fontWeight: '900', color: '#1F2933', marginBottom: 25 },
-  sectionHeader: { fontSize: 14, fontWeight: '700', color: '#6F6A61', marginTop: 25, marginBottom: 15, textTransform: 'uppercase', letterSpacing: 1.5 },
+  sectionHeader: { fontSize: 13, fontWeight: '700', color: '#6F6A61', marginTop: 25, marginBottom: 15, textTransform: 'uppercase', letterSpacing: 2 },
   addBtn: { backgroundColor: '#244C5A', padding: 18, borderRadius: 15, alignItems: 'center', marginBottom: 20 },
   addBtnText: { color: '#FFF', fontWeight: '700', fontSize: 18 },
-  card: { backgroundColor: '#FBF8F1', padding: 24, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#D8D1C5' },
-  activeCard: { borderColor: '#244C5A', borderWidth: 2 },
-  cardName: { fontSize: 32, fontWeight: '800', color: '#1F2933' },
-  cardContext: { fontSize: 20, color: '#6F6A61', fontStyle: 'italic', marginTop: 4 },
-  statusText: { fontSize: 18, color: '#6F6A61', marginVertical: 14 },
   
-  primaryActionRow: { flexDirection: 'row', gap: 12, marginBottom: 15 },
-  btnTeal: { backgroundColor: '#244C5A', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 10, minWidth: 160, alignItems: 'center' },
-  btnSet: { borderWidth: 1, borderColor: '#D8D1C5', paddingVertical: 14, paddingHorizontal: 22, borderRadius: 10, backgroundColor: '#FFF', minWidth: 80, alignItems: 'center' },
-  btnTextWhite: { color: '#FFF', fontWeight: '800', fontSize: 20 },
-  btnTextDark: { color: '#244C5A', fontWeight: '800', fontSize: 20 },
+  // Refined Card Aspect Ratio
+  card: { 
+    backgroundColor: '#FBF8F1', 
+    padding: 16, 
+    borderRadius: 12, 
+    marginBottom: 20, 
+    borderWidth: 1, 
+    borderColor: '#D8D1C5',
+    minHeight: 170, // This shortens the card
+    justifyContent: 'center' 
+  },
+  activeCard: { borderColor: '#244C5A', borderWidth: 2, backgroundColor: '#FFF' },
   
-  secondaryActionRow: { flexDirection: 'row', gap: 12 },
-  editWrapper: { minWidth: 160, alignItems: 'flex-start', paddingLeft: 4 }, // Aligns with 'Followed Up'
-  deleteWrapper: { minWidth: 80, alignItems: 'flex-start' }, // Aligns with 'Set'
-  linkText: { color: '#244C5A', fontWeight: '800', fontSize: 20 },
-  linkTextRed: { color: '#9B4444', fontWeight: '800', fontSize: 20 },
-  deleteConfirmText: { color: '#9B4444', fontWeight: '900', fontSize: 18, textDecorationLine: 'underline' },
+  cardName: { fontSize: 28, fontWeight: '800', color: '#1F2933', lineHeight: 32 },
+  cardContext: { fontSize: 18, color: '#6F6A61', fontStyle: 'italic', marginTop: 2 },
+  statusText: { fontSize: 16, color: '#6F6A61', marginVertical: 8 },
+  
+  // Unified Widths for the Grid (140 and 80)
+  primaryActionRow: { flexDirection: 'row', gap: 12, marginTop: 5, marginBottom: 15 },
+  btnTeal: { backgroundColor: '#244C5A', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 8, minWidth: 140, alignItems: 'center' },
+  btnSet: { borderWidth: 1, borderColor: '#D8D1C5', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 8, backgroundColor: '#FFF', minWidth: 80, alignItems: 'center' },
+  btnTextWhite: { color: '#FFF', fontWeight: '800', fontSize: 18 },
+  btnTextDark: { color: '#244C5A', fontWeight: '800', fontSize: 18 },
+  
+  secondaryActionRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: '#E2DDD4', paddingTop: 12 },
+  editWrapper: { minWidth: 140, alignItems: 'flex-start', paddingLeft: 2 }, 
+  deleteWrapper: { minWidth: 80, alignItems: 'flex-start' },
+  linkText: { color: '#244C5A', fontWeight: '800', fontSize: 18 },
+  linkTextRed: { color: '#9B4444', fontWeight: '800', fontSize: 18 },
+  deleteConfirmText: { color: '#FFF', backgroundColor: '#9B4444', padding: 4, borderRadius: 4, fontWeight: '800', fontSize: 16 },
 
-  label: { fontSize: 11, fontWeight: '800', color: '#B8B2A6', textTransform: 'uppercase', marginBottom: 8 },
-  inputBold: { fontSize: 28, fontWeight: '800', color: '#1F2933', borderBottomWidth: 1, borderColor: '#D8D1C5', paddingBottom: 5, marginBottom: 10 },
-  inputContext: { fontSize: 18, color: '#6F6A61', fontStyle: 'italic', marginBottom: 20 },
+  label: { fontSize: 10, fontWeight: '800', color: '#B8B2A6', textTransform: 'uppercase', marginBottom: 6 },
+  inputBold: { fontSize: 26, fontWeight: '800', color: '#1F2933', borderBottomWidth: 1, borderColor: '#D8D1C5', paddingBottom: 5, marginBottom: 10 },
+  inputContext: { fontSize: 18, color: '#6F6A61', fontStyle: 'italic', marginBottom: 15 },
   divider: { height: 1, backgroundColor: '#E2DDD4', marginVertical: 15 },
-  unitRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
-  unitBtn: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#D8D1C5' },
+  unitRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
+  unitBtn: { flex: 1, alignItems: 'center', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#D8D1C5' },
   unitBtnActive: { backgroundColor: '#244C5A', borderColor: '#244C5A' },
-  valRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  valBtn: { padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#D8D1C5', minWidth: 50, alignItems: 'center' },
-  cancelBtn: { marginTop: 20, padding: 10 },
+  valRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  valBtn: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#D8D1C5', minWidth: 45, alignItems: 'center' },
+  cancelBtn: { marginTop: 15, padding: 5 },
   cancelText: { textAlign: 'center', color: '#6F6A61', fontWeight: '700' }
 });
