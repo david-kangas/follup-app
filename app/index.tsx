@@ -47,12 +47,24 @@ export default function Index() {
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
-  const schedule = async (item: ContactItem) => {
+const schedule = async (item: ContactItem) => {
+    // 1. Check permissions first
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      console.log('Notification permissions not granted yet');
+      return; // Exit early so we don't trigger the crash
+    }
+
     const seconds = Math.max(2, Math.floor((item.nextDue - Date.now()) / 1000));
-    await Notifications.scheduleNotificationAsync({
-      content: { title: 'Follup', body: `Check in with ${item.name}` },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
-    });
+    
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: { title: 'Follup', body: `Check in with ${item.name}` },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds },
+      });
+    } catch (e) {
+      console.log('Notification failed to schedule:', e);
+    }
   };
 
   const handleSave = async (selectedVal: number, existingId?: string) => {
