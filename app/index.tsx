@@ -37,10 +37,23 @@ export default function Index() {
   const [unitBuf, setUnitBuf] = useState<IntervalUnit>('weeks');
 
   useEffect(() => {
-    (async () => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) setData(JSON.parse(stored));
-    })();
+    const prepareApp = async () => {
+      try {
+        // 1. Load your data
+        const stored = await AsyncStorage.getItem(STORAGE_KEY);
+        if (stored) setData(JSON.parse(stored));
+
+        // 2. Ask for permission immediately so iOS doesn't panic
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') {
+          console.log('Permission to notify was denied');
+        }
+      } catch (e) {
+        console.warn('Error during app prep:', e);
+      }
+    };
+
+    prepareApp();
   }, []);
 
   useEffect(() => {
