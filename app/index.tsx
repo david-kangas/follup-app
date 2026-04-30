@@ -181,14 +181,17 @@ const startEdit = (item: ContactItem, index: number) => {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView 
-  ref={scrollRef} 
-  contentContainerStyle={styles.scroll} 
-  keyboardShouldPersistTaps="handled"
-  disableScrollViewPanResponder={true}
-  
->
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+  <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          // Only use these 2 specific props on Android to prevent the "Dive"
+          {...(Platform.OS === 'android' && {
+            disableScrollViewPanResponder: true,
+            maintainVisibleContentPosition: { minIndexForVisible: 0 }
+          })}
+        >
         <Text style={styles.header}>Follup</Text>
         {!isAdding && !expandedId && (
           <TouchableOpacity onPress={() => setIsAdding(true)} style={styles.addBtn}>
@@ -234,8 +237,8 @@ const styles = StyleSheet.create({
   primaryActionRow: { flexDirection: 'row', gap: 12, marginTop: 5, marginBottom: 15 },
   btnTeal: { backgroundColor: '#244C5A', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 8, minWidth: 140, alignItems: 'center' },
   btnSet: { borderWidth: 1, borderColor: '#D8D1C5', paddingVertical: 10, paddingHorizontal: 15, borderRadius: 8, backgroundColor: '#FFF', minWidth: 80, alignItems: 'center' },
-  btnTextWhite: { color: '#FFF', fontWeight: '800', fontSize: 18 },
-  btnTextDark: { color: '#244C5A', fontWeight: '800', fontSize: 18 },
+  btnTextWhite: { color: '#FFF', fontWeight: '700', fontSize: 11, textAlign: 'center' },
+  btnTextDark: { color: '#244C5A', fontWeight: '700', fontSize: 11, textAlign: 'center' },
   
   secondaryActionRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: '#E2DDD4', paddingTop: 12 },
   editWrapper: { minWidth: 140, alignItems: 'flex-start', paddingLeft: 2 }, 
@@ -249,7 +252,7 @@ const styles = StyleSheet.create({
   inputContext: { fontSize: 18, color: '#6F6A61', fontStyle: 'italic', marginBottom: 15 },
   divider: { height: 1, backgroundColor: '#E2DDD4', marginVertical: 15 },
   unitRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
-  unitBtn: { flex: 1, alignItems: 'center', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#D8D1C5' },
+ unitBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#D8D1C5', backgroundColor: '#FBF8F1' },
   unitBtnActive: { backgroundColor: '#244C5A', borderColor: '#244C5A' },
   valRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   valBtn: { padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#D8D1C5', minWidth: 45, alignItems: 'center' },
