@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+
 import React, { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -26,14 +26,7 @@ type ContactItem = {
 const STORAGE_KEY = 'FOLLUP_APP_DATA_PIXEL_PERFECT';
 const DAY_MS = 86400000;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+
 
 export default function Index() {
   const [data, setData] = useState<ContactItem[]>([]);
@@ -73,40 +66,10 @@ export default function Index() {
     });
   }, [data, hasLoaded]);
 
-  const schedule = async (item: ContactItem) => {
-    try {
-      const existing = await Notifications.getPermissionsAsync();
-      let finalStatus = existing.status;
-
-      if (finalStatus !== 'granted') {
-        const requested = await Notifications.requestPermissionsAsync();
-        finalStatus = requested.status;
-      }
-
-      if (finalStatus !== 'granted') {
-        console.log('Notification permissions not granted');
-        return;
-      }
-
-      const seconds = Math.max(
-        2,
-        Math.floor((item.nextDue - Date.now()) / 1000)
-      );
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Follup',
-          body: `Check in with ${item.name}`,
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds,
-        },
-      });
-    } catch (e) {
-      console.log('Notification failed to schedule:', e);
-    }
-  };
+  
+const schedule = async (item: ContactItem) => {
+  console.log(`Notification scheduling temporarily disabled for ${item.name}`);
+};
 
   const handleSave = async (selectedVal: number, existingId?: string) => {
     if (!nameBuf.trim()) return;
