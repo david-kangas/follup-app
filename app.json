@@ -19,7 +19,7 @@
       "bundleIdentifier": "com.davidkangas.follup",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        
       }
     },
     "android": {
@@ -36,7 +36,6 @@
     },
     "owner": "kangasd77",
     "plugins": [
-      "expo-web-browser", "expo-notifications"
     ]
   }
 }
