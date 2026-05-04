@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import * as Notifications from 'expo-notifications';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -25,7 +25,14 @@ type ContactItem = {
 
 const STORAGE_KEY = 'FOLLUP_APP_DATA_PIXEL_PERFECT';
 const DAY_MS = 86400000;
-
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 
 export default function App() {
@@ -68,7 +75,40 @@ export default function App() {
 
   
 const schedule = async (item: ContactItem) => {
-  console.log(`Notification scheduling temporarily disabled for ${item.name}`);
+  try {
+    const existing = await Notifications.getPermissionsAsync();
+    let finalStatus = existing.status;
+
+    if (finalStatus !== 'granted') {
+      const requested = await Notifications.requestPermissionsAsync();
+      finalStatus = requested.status;
+    }
+
+    if (finalStatus !== 'granted') {
+      console.log('Notification permissions not granted');
+      return;
+    }
+
+    const seconds = Math.max(
+  2,
+  Math.floor((item.nextDue - Date.now()) / 1000)
+);
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Follup',
+        body: `Check in with ${item.name}`,
+        sound: 'default',
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds,
+      },
+    });
+
+  } catch (e) {
+    console.log('Notification failed:', e);
+  }
 };
 
   const handleSave = async (selectedVal: number, existingId?: string) => {
@@ -220,18 +260,14 @@ const getStatus = (item: ContactItem) => {
           </TouchableOpacity>
 
           <TouchableOpacity onPress={() => startEdit(item)} style={styles.btnSet}>
-            <Text style={styles.btnTextDark}>Set</Text>
+            <Text style={styles.btnTextDark}>Edit</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.secondaryActionRow}>
-          <View style={styles.editWrapper}>
-            <TouchableOpacity onPress={() => startEdit(item)}>
-              <Text style={styles.linkText}>Edit</Text>
-            </TouchableOpacity>
-          </View>
+          
 
-          <View style={styles.deleteWrapper}>
+          <View style={styles.editWrapper}>
             {confirmDeleteId === item.id ? (
               <TouchableOpacity onPress={() => setData(data.filter(i => i.id !== item.id))}>
                 <Text style={styles.deleteConfirmText}>Confirm?</Text>
@@ -271,7 +307,7 @@ const getStatus = (item: ContactItem) => {
 
         {isAdding && renderActiveEditor()}
 
-  {sortedList.map(i => renderCard(i, getStatus(i)))}
+        {sortedList.map(i => renderCard(i, getStatus(i)))}
       </ScrollView>
     </KeyboardAvoidingView>
   );
