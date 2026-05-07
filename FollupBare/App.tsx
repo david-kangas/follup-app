@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Contacts from 'expo-contacts';
 import * as Notifications from 'expo-notifications';
 import React, { useEffect, useRef, useState } from 'react';
@@ -22,10 +23,15 @@ type ContactItem = {
   intervalValue: number;
   intervalUnit: IntervalUnit;
   context?: string;
+  reminderHour?: number;
+  reminderMinute?: number;
+  hasCustomTime?: boolean;
 };
 
 const STORAGE_KEY = 'FOLLUP_APP_DATA_PIXEL_PERFECT';
 const DAY_MS = 86400000;
+const DEFAULT_REMINDER_HOUR = 9;
+const DEFAULT_REMINDER_MINUTE = 0;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -47,6 +53,11 @@ export default function App() {
   const [contextBuf, setContextBuf] = useState('');
   const [unitBuf, setUnitBuf] = useState<IntervalUnit>('weeks');
   const [phoneContacts, setPhoneContacts] = useState<Contacts.Contact[]>([]);
+
+  const [reminderHourBuf, setReminderHourBuf] = useState(DEFAULT_REMINDER_HOUR);
+  const [reminderMinuteBuf, setReminderMinuteBuf] = useState(DEFAULT_REMINDER_MINUTE);
+  const [hasCustomTimeBuf, setHasCustomTimeBuf] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const nameInputRef = useRef<TextInput>(null);
@@ -117,6 +128,52 @@ export default function App() {
     })
     .slice(0, 5);
 
+  const addIntervalToDate = (
+    baseDate: Date,
+    value: number,
+    unit: IntervalUnit
+  ) => {
+    const next = new Date(baseDate);
+
+    if (unit === 'days') next.setDate(next.getDate() + value);
+    if (unit === 'weeks') next.setDate(next.getDate() + value * 7);
+    if (unit === 'months') next.setMonth(next.getMonth() + value);
+
+    return next;
+  };
+
+  const buildNextDue = (
+    value: number,
+    unit: IntervalUnit,
+    hour: number,
+    minute: number
+  ) => {
+    const now = new Date();
+    const next = addIntervalToDate(now, value, unit);
+    next.setHours(hour, minute, 0, 0);
+    return next.getTime();
+  };
+
+  const applyTimeToExistingDueDate = (
+    nextDue: number,
+    hour: number,
+    minute: number
+  ) => {
+    const next = new Date(nextDue);
+    next.setHours(hour, minute, 0, 0);
+    return next.getTime();
+  };
+
+  const formatTime = (hour: number, minute: number) => {
+    const date = new Date();
+    date.setHours(hour, minute, 0, 0);
+
+    return date.toLocaleTimeString([], {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
+
   const schedule = async (item: ContactItem) => {
     try {
       const existing = await Notifications.getPermissionsAsync();
@@ -132,10 +189,7 @@ export default function App() {
         return;
       }
 
-      const seconds = Math.max(
-        2,
-        Math.floor((item.nextDue - Date.now()) / 1000)
-      );
+      const triggerDate = new Date(item.nextDue);
 
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -144,8 +198,8 @@ export default function App() {
           sound: 'default',
         },
         trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds,
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
         },
       });
     } catch (e) {
@@ -156,14 +210,12 @@ export default function App() {
   const handleSave = async (selectedVal: number, existingId?: string) => {
     if (!nameBuf.trim()) return;
 
-    const ms =
-      unitBuf === 'days'
-        ? selectedVal * DAY_MS
-        : unitBuf === 'weeks'
-          ? selectedVal * 7 * DAY_MS
-          : selectedVal * 30 * DAY_MS;
-
-    const nextDue = Date.now() + ms;
+    const nextDue = buildNextDue(
+      selectedVal,
+      unitBuf,
+      reminderHourBuf,
+      reminderMinuteBuf
+    );
 
     const newItem: ContactItem = {
       id: existingId || String(Date.now()),
@@ -172,6 +224,9 @@ export default function App() {
       intervalValue: selectedVal,
       intervalUnit: unitBuf,
       nextDue,
+      reminderHour: reminderHourBuf,
+      reminderMinute: reminderMinuteBuf,
+      hasCustomTime: hasCustomTimeBuf,
     };
 
     setData(
@@ -184,17 +239,42 @@ export default function App() {
     closeAll();
   };
 
-  const handleFollowUp = async (item: ContactItem) => {
-    const ms =
-      item.intervalUnit === 'days'
-        ? item.intervalValue * DAY_MS
-        : item.intervalUnit === 'weeks'
-          ? item.intervalValue * 7 * DAY_MS
-          : item.intervalValue * 30 * DAY_MS;
+  const handleSaveChanges = async () => {
+    if (!expandedId || !nameBuf.trim()) return;
 
-    const updated = {
+    const existingItem = data.find(i => i.id === expandedId);
+    if (!existingItem) return;
+
+    const updated: ContactItem = {
+      ...existingItem,
+      name: nameBuf.trim(),
+      context: contextBuf.trim() || undefined,
+      reminderHour: reminderHourBuf,
+      reminderMinute: reminderMinuteBuf,
+      hasCustomTime: hasCustomTimeBuf,
+      nextDue: applyTimeToExistingDueDate(
+        existingItem.nextDue,
+        reminderHourBuf,
+        reminderMinuteBuf
+      ),
+    };
+
+    setData(data.map(i => (i.id === expandedId ? updated : i)));
+
+    await schedule(updated);
+    closeAll();
+  };
+
+  const handleFollowUp = async (item: ContactItem) => {
+    const hour = item.reminderHour ?? DEFAULT_REMINDER_HOUR;
+    const minute = item.reminderMinute ?? DEFAULT_REMINDER_MINUTE;
+
+    const updated: ContactItem = {
       ...item,
-      nextDue: Date.now() + ms,
+      nextDue: buildNextDue(item.intervalValue, item.intervalUnit, hour, minute),
+      reminderHour: hour,
+      reminderMinute: minute,
+      hasCustomTime: item.hasCustomTime ?? false,
     };
 
     setData(data.map(i => (i.id === item.id ? updated : i)));
@@ -207,9 +287,14 @@ export default function App() {
     setConfirmDeleteId(null);
     setNameBuf('');
     setContextBuf('');
+    setReminderHourBuf(DEFAULT_REMINDER_HOUR);
+    setReminderMinuteBuf(DEFAULT_REMINDER_MINUTE);
+    setHasCustomTimeBuf(false);
+    setShowTimePicker(false);
   };
 
   const startAdd = () => {
+    closeAll();
     setIsAdding(true);
     loadContacts();
   };
@@ -220,6 +305,10 @@ export default function App() {
     setNameBuf(item.name);
     setContextBuf(item.context || '');
     setUnitBuf(item.intervalUnit);
+    setReminderHourBuf(item.reminderHour ?? DEFAULT_REMINDER_HOUR);
+    setReminderMinuteBuf(item.reminderMinute ?? DEFAULT_REMINDER_MINUTE);
+    setHasCustomTimeBuf(item.hasCustomTime ?? false);
+    setShowTimePicker(false);
     setIsAdding(false);
   };
 
@@ -280,6 +369,59 @@ export default function App() {
 
       <View style={styles.divider} />
 
+      <View style={styles.timeSection}>
+        <Text style={styles.timeLabel}>
+          Time ·{' '}
+          {hasCustomTimeBuf
+            ? formatTime(reminderHourBuf, reminderMinuteBuf)
+            : 'Default 9:00 AM'}
+        </Text>
+
+        <View style={styles.timeRow}>
+          <TouchableOpacity
+            style={styles.timeBtn}
+            onPress={() => {
+              const now = new Date();
+              setReminderHourBuf(now.getHours());
+              setReminderMinuteBuf(now.getMinutes());
+              setHasCustomTimeBuf(true);
+            }}
+          >
+            <Text style={styles.btnTextDark}>Use Current Time</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.timeBtn}
+            onPress={() => setShowTimePicker(true)}
+          >
+            <Text style={styles.btnTextDark}>Pick Time</Text>
+          </TouchableOpacity>
+        </View>
+
+        {showTimePicker && (
+          <DateTimePicker
+            value={
+              new Date(
+                new Date().setHours(reminderHourBuf, reminderMinuteBuf, 0, 0)
+              )
+            }
+            mode="time"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={(event, selectedDate) => {
+              if (Platform.OS === 'android') setShowTimePicker(false);
+
+              if (selectedDate) {
+                setReminderHourBuf(selectedDate.getHours());
+                setReminderMinuteBuf(selectedDate.getMinutes());
+                setHasCustomTimeBuf(true);
+              }
+            }}
+          />
+        )}
+      </View>
+
+      <View style={styles.divider} />
+
       <View style={styles.unitRow}>
         {(['days', 'weeks', 'months'] as IntervalUnit[]).map(u => (
           <TouchableOpacity
@@ -306,6 +448,12 @@ export default function App() {
         ))}
       </View>
 
+      {existingId && (
+        <TouchableOpacity onPress={handleSaveChanges} style={styles.saveChangesBtn}>
+          <Text style={styles.btnTextWhite}>Save Changes</Text>
+        </TouchableOpacity>
+      )}
+
       <TouchableOpacity onPress={closeAll} style={styles.cancelBtn}>
         <Text style={styles.cancelText}>Cancel</Text>
       </TouchableOpacity>
@@ -315,13 +463,20 @@ export default function App() {
   const renderCard = (item: ContactItem, status: string) => {
     if (expandedId === item.id) return renderActiveEditor(item.id);
 
+    const showCustomTime = item.hasCustomTime === true;
+    const hour = item.reminderHour ?? DEFAULT_REMINDER_HOUR;
+    const minute = item.reminderMinute ?? DEFAULT_REMINDER_MINUTE;
+
     return (
       <View key={item.id} style={styles.card}>
         <Text style={styles.cardName}>{item.name}</Text>
 
         {item.context && <Text style={styles.cardContext}>Re: {item.context}</Text>}
 
-        <Text style={styles.statusText}>{status}</Text>
+        <Text style={styles.statusText}>
+          {status}
+          {showCustomTime ? ` · ${formatTime(hour, minute)}` : ''}
+        </Text>
 
         <View style={styles.primaryActionRow}>
           <TouchableOpacity onPress={() => handleFollowUp(item)} style={styles.btnTeal}>
@@ -461,6 +616,16 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: 'center',
   },
+  timeBtn: {
+    borderWidth: 1,
+    borderColor: '#D8D1C5',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#FFF',
+    flex: 1,
+    alignItems: 'center',
+  },
   btnTextWhite: {
     color: '#FFF',
     fontWeight: '700',
@@ -534,6 +699,22 @@ const styles = StyleSheet.create({
     color: '#244C5A',
     fontWeight: '600',
   },
+  timeSection: {
+    marginBottom: 6,
+  },
+  timeLabel: {
+    fontSize: 13,
+    color: '#6F6A61',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
   unitRow: {
     flexDirection: 'row',
     gap: 6,
@@ -566,6 +747,14 @@ const styles = StyleSheet.create({
     borderColor: '#D8D1C5',
     minWidth: 38,
     alignItems: 'center',
+  },
+  saveChangesBtn: {
+    backgroundColor: '#244C5A',
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
   },
   cancelBtn: {
     marginTop: 8,

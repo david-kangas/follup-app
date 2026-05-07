@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Follup",
-    "slug": "Follup",
+    "slug": "FollupBare",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F1EDE5"
     },
     "ios": {
       "supportsTablet": true,
@@ -18,10 +18,12 @@
     },
     "android": {
       "adaptiveIcon": {
+        "package": "com.kangasd77.follup",
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.davidkangas.follup"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,6 +33,9 @@
         "projectId": "a40a7cfb-e438-4b8a-9278-0089a0b34802"
       }
     },
-    "owner": "kangasd77"
+    "owner": "kangasd77",
+    "plugins": [
+      "@react-native-community/datetimepicker"
+    ]
   }
 }
